@@ -1,0 +1,11 @@
+{
+  "name": "spacetime-glitchography",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Spacetime Glitchography — planetary catalog and generative glitch dioramas",
+  "scripts": {
+    "dev": "npx --yes serve . -l 4177",
+    "deploy": "npx --yes vercel --prod --yes",
+    "deploy:preview": "npx --yes vercel --yes"
+  }
+}

@@ -533,13 +533,63 @@
             } catch (_) { /* analytics optional */ }
         }
 
+        // ─── mobile performance profile ────────────────────────────────────
+        // Goal: ~30fps (floor ~24) on phones with minimal visual sacrifice.
+        // Desktop stays at full quality. Override: ?perf=mobile|desktop
+        const PERF = (() => {
+            const q = new URLSearchParams(location.search).get('perf');
+            const ua = navigator.userAgent || '';
+            let mobile = /iPhone|iPad|iPod|Android/i.test(ua)
+                || (navigator.maxTouchPoints > 1
+                    && matchMedia('(pointer: coarse)').matches
+                    && matchMedia('(max-width: 920px)').matches);
+            if (q === 'mobile') mobile = true;
+            if (q === 'desktop') mobile = false;
+            if (!mobile) {
+                return {
+                    mobile: false,
+                    dprCap: 2,
+                    maxCanvas: 1100,
+                    planetDetail: 96,
+                    atmoW: 96, atmoH: 64,
+                    cloudW: 96, cloudH: 64,
+                    ringSeg: 256, ringRadial: 4,
+                    moonDetail: 24,
+                    skyW: 48, skyH: 32,
+                    noiseOct: { base: 6, ridge: 5, detail: 4, cloud: 5, sky: 4, sky2: 3 },
+                    microDepth: 2,
+                    antialias: true,
+                    targetFps: 0,
+                    starMul: 1,
+                };
+            }
+            // Mobile: cut fill-rate & tessellation first (least visible on small screens)
+            return {
+                mobile: true,
+                dprCap: 1.25,          // was up to 2 — big win on retina
+                maxCanvas: 720,         // was 1100
+                planetDetail: 48,       // was 96 — still reads as a smooth globe
+                atmoW: 48, atmoH: 36,   // was 96×64
+                cloudW: 48, cloudH: 36,
+                ringSeg: 128, ringRadial: 3, // was 256×4
+                moonDetail: 12,         // was 24
+                skyW: 32, skyH: 24,     // was 48×32
+                noiseOct: { base: 4, ridge: 3, detail: 3, cloud: 3, sky: 3, sky2: 2 },
+                microDepth: 1,          // was 2
+                antialias: false,
+                targetFps: 30,          // aim 30; floor ~24 under load
+                starMul: 0.5,
+            };
+        })();
+        window.__PERF = PERF;
+
         // ─── renderer, camera, constrained controls ────────────────────────
         const container = document.getElementById('canvas-container');
-        const renderer = new THREE.WebGPURenderer({ antialias: true });
+        const renderer = new THREE.WebGPURenderer({ antialias: PERF.antialias });
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.1;
-        const SIZE = () => Math.min(container.clientWidth, 1100);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        const SIZE = () => Math.min(container.clientWidth, PERF.maxCanvas);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PERF.dprCap));
         container.appendChild(renderer.domElement);
 
         const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 400);
@@ -560,6 +610,7 @@
         controls.maxDistance = homeDist * 1.5;
 
         function resize() {
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PERF.dprCap));
             const s = SIZE();
             renderer.setSize(s, s, false);
             camera.aspect = 1;
@@ -853,15 +904,15 @@
             ).mul(wAmt * 0.4);
             const q = p0.add(warp).toVar();
 
-            // shared stack
-            const base = mx_fractal_noise_float(q, 6, 2.1, 0.52).mul(0.5).add(0.5).toVar();      // 0..1 continents
-            const ridgeRaw = float(1.0).sub(abs(mx_fractal_noise_float(q.mul(2.3).add(9.1), 5, 2.2, 0.55))).toVar();
+            // shared stack (octaves drop on mobile PERF — same look, less ALU)
+            const base = mx_fractal_noise_float(q, PERF.noiseOct.base, 2.1, 0.52).mul(0.5).add(0.5).toVar();      // 0..1 continents
+            const ridgeRaw = float(1.0).sub(abs(mx_fractal_noise_float(q.mul(2.3).add(9.1), PERF.noiseOct.ridge, 2.2, 0.55))).toVar();
             const ridge = ridgeRaw.mul(ridgeRaw).toVar();                                        // sharp crests
-            const detail = mx_fractal_noise_float(q.mul(5.5).add(17.3), 4, 2.2, 0.5).toVar();    // fine grain ±
+            const detail = mx_fractal_noise_float(q.mul(5.5).add(17.3), PERF.noiseOct.detail, 2.2, 0.5).toVar();    // fine grain ±
             const wor = mx_worley_noise_float(q.mul(1.7).add(off2)).toVar();
             const worFine = mx_worley_noise_float(q.mul(3.1 * (0.45 + N.crat01 * 1.3)).add(off2.mul(1.7))).toVar();
             // grammar-generated micro field — high-frequency, zoom-proof detail
-            const micro = randomField(sub(22), dir.mul(freq * 4.0 + 20.0), 2).toVar();
+            const micro = randomField(sub(22), dir.mul(freq * 4.0 + 20.0), PERF.microDepth).toVar();
             const latBands = sin(lat.mul(Math.PI * (2 + band * 8)).add(warp.x.mul(3.0)));
 
             // feature anchors
@@ -1077,14 +1128,14 @@
             const axis = new THREE.Group();
             axis.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), w.axisDir);
             scene.add(axis);
-            const planetGeo = new THREE.IcosahedronGeometry(R, 96);
+            const planetGeo = new THREE.IcosahedronGeometry(R, PERF.planetDetail);
             const planet = new THREE.Mesh(planetGeo, buildPlanetMaterial(w, pal, sunVec));
             axis.add(planet);
             animated.spinners.push({ obj: planet, speed: w.spinRate });
 
             // atmosphere — only when the spec sheet says so, and tight to the limb
             if (w.hasAtmo) {
-                const aGeo = new THREE.SphereGeometry(R * (1.018 + w.atmoStrength * 0.045), 96, 64);
+                const aGeo = new THREE.SphereGeometry(R * (1.018 + w.atmoStrength * 0.045), PERF.atmoW, PERF.atmoH);
                 const aMat = new THREE.MeshBasicNodeMaterial({
                     transparent: true, side: THREE.BackSide,
                     blending: THREE.AdditiveBlending, depthWrite: false
@@ -1106,11 +1157,11 @@
 
             // clouds — terran worlds with air, hard-edged cells
             if (w.kind === 'terran' && w.hasAtmo && N.clouds01 > 0.03) {
-                const cGeo = new THREE.SphereGeometry(R * 1.02, 96, 64);
+                const cGeo = new THREE.SphereGeometry(R * 1.02, PERF.cloudW, PERF.cloudH);
                 const cMat = new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, roughness: 1 });
                 const cOff = noiseOffsets(rng);
                 const cd = normalize(positionLocal);
-                const cn = mx_fractal_noise_float(cd.mul(3.2).add(cOff).add(vec3(time.mul(0.008), 0, time.mul(0.012))), 5, 2.1, 0.55).mul(0.5).add(0.5);
+                const cn = mx_fractal_noise_float(cd.mul(3.2).add(cOff).add(vec3(time.mul(0.008), 0, time.mul(0.012))), PERF.noiseOct.cloud, 2.1, 0.55).mul(0.5).add(0.5);
                 const cover = smoothstep(float(0.62 - N.clouds01 * 0.4), float(0.68 - N.clouds01 * 0.32), cn);
                 cMat.colorNode = hslv(pal.skyH, 0.08, 0.94);
                 cMat.opacityNode = cover.mul(Math.min(1, N.clouds01 * 1.3));
@@ -1126,7 +1177,7 @@
                 let outer = Math.min(inner + R * rr(rng, 0.35, 0.95), 4.55);
                 if (outer - inner < 0.25) outer = inner + 0.25;
                 ringOuter = outer;
-                const rGeo = new THREE.RingGeometry(inner, outer, 256, 4);
+                const rGeo = new THREE.RingGeometry(inner, outer, PERF.ringSeg, PERF.ringRadial);
                 const rMat = new THREE.MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false });
                 const rad = length(positionLocal.xy);
                 const rt = rad.sub(inner).div(outer - inner).toVar();
@@ -1183,7 +1234,7 @@
                     mMat.colorNode = tslHsl2rgb(vec3(mHue, 0.1 + N.spec01 * 0.25,
                         float(0.42).add(mn.mul(0.2)).sub(smoothstep(0.25, 0.06, mwor).mul(0.2))));
                 }
-                const moon = new THREE.Mesh(new THREE.IcosahedronGeometry(mr, 24), mMat);
+                const moon = new THREE.Mesh(new THREE.IcosahedronGeometry(mr, PERF.moonDetail), mMat);
                 scene.add(moon);
                 const minOrbit = Math.max(R + 0.6, ringOuter + 0.25);
                 animated.moons.push({
@@ -1293,7 +1344,7 @@
         function buildSky(pal, mode) {
             const rng = sub(51);
             const N = normParams();
-            const starCount = Math.max(0, Math.round(params.sky));
+            const starCount = Math.max(0, Math.round(params.sky * PERF.starMul));
             const lightSky = mode !== 'void';
             const pos = new Float32Array(starCount * 3);
             const col = new Float32Array(starCount * 3);
@@ -1315,12 +1366,12 @@
             sGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
             scene.add(new THREE.Points(sGeo, new THREE.PointsMaterial({ size: 0.55, vertexColors: true, sizeAttenuation: true })));
 
-            const nGeo = new THREE.SphereGeometry(170, 48, 32);
+            const nGeo = new THREE.SphereGeometry(170, PERF.skyW, PERF.skyH);
             const nMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
             const nOff = noiseOffsets(rng);
             const nd = normalize(positionLocal);
-            const nn = mx_fractal_noise_float(nd.mul(2.2).add(nOff), 4, 2.0, 0.6).mul(0.5).add(0.5);
-            const nn2 = mx_fractal_noise_float(nd.mul(4.5).add(nOff.mul(1.7)), 3, 2.0, 0.5).mul(0.5).add(0.5);
+            const nn = mx_fractal_noise_float(nd.mul(2.2).add(nOff), PERF.noiseOct.sky, 2.0, 0.6).mul(0.5).add(0.5);
+            const nn2 = mx_fractal_noise_float(nd.mul(4.5).add(nOff.mul(1.7)), PERF.noiseOct.sky2, 2.0, 0.5).mul(0.5).add(0.5);
             const nebHue = fract(float(pal.skyH).add(nn2.mul(0.22 * (0.4 + N.spec01))));
             if (mode === 'paper') {
                 // light-mode sky: warm paper, nebulae printed as ink etchings
@@ -1839,8 +1890,20 @@
 
         // ─── animation ─────────────────────────────────────────────────────
         const clock = new THREE.Clock();
+        let _frameBudget = 0; // accumulates real time between renders (mobile cap)
         function tick() {
-            const dt = Math.min(clock.getDelta(), 0.1);
+            const rawDt = clock.getDelta();
+            let dt;
+            if (PERF.targetFps > 0) {
+                // Aim ~30fps on mobile: skip rAF renders that arrive too soon
+                _frameBudget += rawDt;
+                const minDt = 1 / PERF.targetFps;
+                if (_frameBudget < minDt * 0.9) return;
+                dt = Math.min(_frameBudget, 0.1);
+                _frameBudget = 0;
+            } else {
+                dt = Math.min(rawDt, 0.1);
+            }
             const t = clock.elapsedTime;
             controls.update();
             for (const s of animated.spinners) s.obj.rotation.y += s.speed * dt;
@@ -2191,6 +2254,12 @@
                 buildAll();
                 renderer.setAnimationLoop(tick);
                 document.getElementById('loading').classList.add('done');
+                if (PERF.mobile) {
+                    setStatus('MOBILE PROFILE · TARGET 30fps · QUALITY TUNED FOR HANDHELD');
+                    setTimeout(() => {
+                        if (world) announceWorld();
+                    }, 2800);
+                }
             } catch (err) {
                 document.getElementById('loading').textContent = 'RENDERER FAILED: ' + err.message;
                 setStatus('RENDERER FAILED · ' + err.message);

@@ -1,6 +1,6 @@
 # Spacetime Glitchography
 
-Planetary catalog and generative glitch dioramas — evolved from the Planetarium / Planetary Glitchography workbench.
+Planetary generative glitch dioramas (single-page WebGPU app).
 
 ## Local
 
@@ -15,11 +15,6 @@ npm run dev
 npm run deploy
 ```
 
-## Files
+## Source
 
-| File | Role |
-|------|------|
-| `index.html` | Main Planetary Glitchography catalog / dioramas UI |
-| `planetary_dioramas.html` | Same as index (source name) |
-| `planetary_glitchography.html` | Earlier Martian Everlocked generative piece |
-| `inspo/`, `glitch-inspo/`, `additional-inspo/`, `ux-inspo/` | Reference material |
+- `index.html` / `spacetime-glitchography.html` — main app

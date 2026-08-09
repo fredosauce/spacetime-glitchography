@@ -2,7 +2,7 @@
   "name": "spacetime-glitchography",
   "private": true,
   "version": "1.0.0",
-  "description": "Spacetime Glitchography — planetary catalog and generative glitch dioramas",
+  "description": "Spacetime Glitchography \u2014 planetary generative glitch dioramas",
   "scripts": {
     "dev": "npx --yes serve . -l 4177",
     "deploy": "npx --yes vercel --prod --yes",

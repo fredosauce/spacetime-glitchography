@@ -28,6 +28,14 @@
     <meta name="twitter:image" content="https://spacetime-glitchography.vercel.app/og-image.png">
     <meta name="twitter:image:alt" content="Spacetime Glitchography — GG-6707 «LICHEN LAGOON» gas giant under spectral glitch fields">
 
+    <!-- Vercel Web Analytics + Speed Insights (pageviews & Core Web Vitals) -->
+    <script>
+        window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+        window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>
+    <script defer src="/_vercel/speed-insights/script.js"></script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Archivo:wght@600;700;900&display=swap" rel="stylesheet">
@@ -515,6 +523,15 @@
         // ─── status line ───────────────────────────────────────────────────
         const statusBar = document.getElementById('status-bar');
         function setStatus(msg) { if (statusBar) statusBar.textContent = msg; }
+
+        // Vercel Analytics custom events (no-ops if script not loaded)
+        function track(name, data = {}) {
+            try {
+                if (typeof window.va === 'function') {
+                    window.va('event', Object.keys(data).length ? { name, data } : { name });
+                }
+            } catch (_) { /* analytics optional */ }
+        }
 
         // ─── renderer, camera, constrained controls ────────────────────────
         const container = document.getElementById('canvas-container');
@@ -1951,6 +1968,7 @@
             audioN.master.gain.setTargetAtTime(audioOn ? 0.045 : 0, audioCtx.currentTime, 0.3);
             audioBtn.textContent = 'TRANSMISSION AUDIO: ' + (audioOn ? 'ON' : 'OFF');
             if (audioOn) retuneAudio();
+            track('audio_toggle', { on: String(audioOn) });
         });
         let rebuildTimer = null;
         function scheduleRebuild() {
@@ -1970,6 +1988,7 @@
                 params[s.id] = snapToStep(v, s);
                 el.value = fmt(s, params[s.id]);
                 scheduleRebuild();
+                track('param_change', { id: s.id });
             });
         }
         document.querySelectorAll('.dice').forEach((b) => b.addEventListener('click', () => {
@@ -1977,10 +1996,12 @@
             params[s.id] = snapToStep(s.min + Math.random() * (s.max - s.min), s);
             document.getElementById(s.id).value = fmt(s, params[s.id]);
             scheduleRebuild();
+            track('param_dice', { id: s.id });
         }));
         document.getElementById('archetype').addEventListener('change', (e) => {
             params.archetype = e.target.value;
             scheduleRebuild();
+            track('archetype_change', { archetype: e.target.value });
         });
         for (let i = 0; i < 3; i++) {
             const el = document.getElementById('color' + (i + 1));
@@ -1991,15 +2012,16 @@
             });
         }
         const seedInput = document.getElementById('seed-input');
-        function setSeed(s, clearMut = true) {
+        function setSeed(s, clearMut = true, via = 'input') {
             params.seed = Math.max(1, Math.floor(s));
             if (clearMut) params.mutation = null;
             seedInput.value = params.seed;
             scheduleRebuild();
+            track('seed_change', { via, seed: String(params.seed) });
         }
-        seedInput.addEventListener('change', () => setSeed(parseInt(seedInput.value) || params.seed));
-        document.getElementById('btn-prev-seed').addEventListener('click', () => setSeed(params.seed - 1));
-        document.getElementById('btn-next-seed').addEventListener('click', () => setSeed(params.seed + 1));
+        seedInput.addEventListener('change', () => setSeed(parseInt(seedInput.value) || params.seed, true, 'input'));
+        document.getElementById('btn-prev-seed').addEventListener('click', () => setSeed(params.seed - 1, true, 'prev'));
+        document.getElementById('btn-next-seed').addEventListener('click', () => setSeed(params.seed + 1, true, 'next'));
 
         // GENERATE = a full spin of every dial, not just the seed
         function snapToStep(v, s) {
@@ -2021,6 +2043,7 @@
                 0.5 + Math.random() * 0.4, i === 2 ? 0.55 + Math.random() * 0.15 : 0.45 + Math.random() * 0.2).getHexString());
             syncUI();
             scheduleRebuild();
+            track('autogenerate', { seed: String(params.seed) });
         }
         document.getElementById('btn-random-seed').addEventListener('click', randomizeAll);
 
@@ -2039,6 +2062,7 @@
             params = JSON.parse(JSON.stringify(defaultParams));
             syncUI();
             scheduleRebuild();
+            track('reset');
         });
 
         // ─── archive / recall: sealing exposes the specimen to mutation ────
@@ -2078,6 +2102,11 @@
             setStatus(contracted
                 ? 'SPECIMEN ARCHIVED · UNSHIELDED EXPOSURE DURING SEALING · MUTATION CONTRACTED: ☣ ' + MUT_LABEL[contracted]
                 : 'SPECIMEN ARCHIVED · SEAL CLEAN · ' + world.designation + ' «' + world.name + '»');
+            track('archive', {
+                seed: String(params.seed),
+                kind: world.kind || '',
+                mutation: contracted || 'none',
+            });
         });
 
         // v1/v2 certificates stored 0–1 fractions; rescale to physical units
@@ -2126,8 +2155,10 @@
                 }
                 setStatus('SPECIMEN RECALLED · ' + world.designation + ' «' + world.name + '»' +
                     (params.mutation ? ' · CARRIES ☣ ' + MUT_LABEL[params.mutation.type] : ' · MUTATION SLOT EMPTY'));
+                track('recall', { seed: String(params.seed), kind: world.kind || '' });
             } catch (err) {
                 setStatus('RECALL FAILED · CERTIFICATE UNREADABLE · ' + err.message);
+                track('recall_failed');
             }
             fileInput.value = '';
         });
@@ -2145,6 +2176,11 @@
             a.download = (world.designation + '-' + world.name.replace(/\s+/g, '-') + '-proof2x.png').toLowerCase();
             a.click();
             setStatus('PROOF PULLED AT 2× · ' + world.designation + ' «' + world.name + '»');
+            track('proof', {
+                seed: String(params.seed),
+                designation: world.designation || '',
+                kind: world.kind || '',
+            });
         });
 
         // ─── ignition ──────────────────────────────────────────────────────

@@ -564,18 +564,19 @@
                 };
             }
             // Mobile: cut fill-rate & tessellation first (least visible on small screens)
+            // Quality nudge: sharper DPR, full micro field, slightly denser globe
             return {
                 mobile: true,
-                dprCap: 1.25,          // was up to 2 — big win on retina
+                dprCap: 1.4,            // was 1.25 — modest retina bump
                 maxCanvas: 720,         // was 1100
-                planetDetail: 48,       // was 96 — still reads as a smooth globe
+                planetDetail: 56,       // was 48 (desktop 96)
                 atmoW: 48, atmoH: 36,   // was 96×64
                 cloudW: 48, cloudH: 36,
                 ringSeg: 128, ringRadial: 3, // was 256×4
                 moonDetail: 12,         // was 24
                 skyW: 32, skyH: 24,     // was 48×32
                 noiseOct: { base: 4, ridge: 3, detail: 3, cloud: 3, sky: 3, sky2: 2 },
-                microDepth: 1,          // was 2
+                microDepth: 2,          // restore surface crispness
                 antialias: false,
                 targetFps: 30,          // aim 30; floor ~24 under load
                 starMul: 0.5,

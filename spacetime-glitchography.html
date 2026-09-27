@@ -206,6 +206,16 @@
         .tag.empty { background: transparent; color: #94929f; }
         @keyframes stampIn { 0% { transform: scale(2.4) rotate(-9deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
         .hint { font-size: 12px; color: var(--ink-soft); letter-spacing: 0.06em; text-align: center; }
+        /* birthday specimens: parameters are locked so the same date always prints the same world */
+        body.birthday-mode .console-params .section:not(.paperwork),
+        body.birthday-mode .seed-strip, body.birthday-mode #btn-random-seed { opacity: 0.45; pointer-events: none; }
+        body.birthday-mode #btn-reset { display: none; }
+        .tag.born { background: var(--ink); border-color: var(--ink); color: #f2f0eb; }
+        .btn.print { background: var(--ink); border-color: var(--ink); color: #f2f0eb; }
+        .btn.print:hover:not(:disabled) { background: var(--orange); border-color: var(--orange); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        #seal-slot:empty { display: none; }
+        #seal-slot { margin-top: 8px; }
         @media (max-width: 760px) {
             .container {
                 grid-template-columns: 1fr;
@@ -289,12 +299,16 @@
                 </div>
             </div>
 
-            <div class="section">
+            <div class="section paperwork">
                 <div class="section-head">PAPERWORK</div>
                 <div class="btn-row">
                     <button class="btn" id="btn-reset">RESET</button>
                     <button class="btn" id="btn-capture">PROOF&nbsp;2×</button>
                 </div>
+                <div class="btn-row">
+                    <button class="btn print" id="btn-print" title="Print-resolution render with its specimen certificate">PRINT&nbsp;6K</button>
+                </div>
+                <div id="seal-slot"></div>
                 <div class="btn-row">
                     <button class="btn" id="btn-save">ARCHIVE&nbsp;.JS</button>
                     <button class="btn" id="btn-load">RECALL&nbsp;.JS</button>
@@ -1936,6 +1950,7 @@
             document.getElementById('plate-cls').textContent = w.massClass + ' CLASS';
             document.getElementById('plate-name').textContent = '«' + w.name + '»';
             const tags = [];
+            if (BDAY) tags.push({ t: 'BORN ' + BDAY.label.toUpperCase() + ' · ' + BDAY.stone.toUpperCase(), c: 'tag born' });
             tags.push({ t: KIND_LABEL[w.kind], c: 'tag' });
             tags.push({ t: w.hasRings ? 'RINGED · ' + w.ringStyle.toUpperCase() : 'RINGLESS', c: 'tag' });
             tags.push({ t: w.hasAtmo ? 'ATMOSPHERE' : 'AIRLESS', c: 'tag' });
@@ -2147,6 +2162,7 @@
                 generator: 'Spacetime Glitchography',
                 saved: new Date().toISOString(),
                 seed: params.seed,
+                birthday: BDAY ? { date: BDAY.date, stone: BDAY.stone } : undefined,
                 specimen: { designation: world.designation, name: world.name, massClass: world.massClass, kind: world.kind, features: world.feats },
                 params: params,
                 camera: { radius: sph.radius, phi: sph.phi, theta: sph.theta }
@@ -2247,6 +2263,199 @@
             });
         });
 
+        // ─── birthday specimens, deep links, print editions ────────────────
+        // ?seed=48291            open a specific world
+        // ?birthday=1991-03-14   seed = YYYYMMDD, birthstone inks, dials locked (same date → same world)
+        // &name=Ada              printed on the certificate strip
+        // ?studio                owner mode: print without sealing; &autoprint for batch renders, &px=8192 to force a size
+        const Q = new URLSearchParams(location.search);
+        const STUDIO = Q.has('studio');
+        const BIRTHSTONES = [
+            ['January', 'Garnet', ['#7a1020', '#d8434f', '#f2b8a0']],
+            ['February', 'Amethyst', ['#3d1a6e', '#9a63d8', '#e3c8ff']],
+            ['March', 'Aquamarine', ['#0f4c5c', '#5fc4d0', '#d7f5f2']],
+            ['April', 'Diamond', ['#2b3440', '#b9c6d6', '#ffffff']],
+            ['May', 'Emerald', ['#083d2a', '#1f9a63', '#a8f0c6']],
+            ['June', 'Alexandrite', ['#1d4f4a', '#7b3f8c', '#e7b7d6']],
+            ['July', 'Ruby', ['#4a0612', '#c0122f', '#ff8a8a']],
+            ['August', 'Peridot', ['#34470b', '#9cc23a', '#e6f5a3']],
+            ['September', 'Sapphire', ['#0b1f5c', '#2f5fd0', '#a9c4ff']],
+            ['October', 'Opal', ['#2e4a6b', '#e8a06c', '#54e0c0']],
+            ['November', 'Topaz', ['#6b3a06', '#e89a24', '#ffe0a0']],
+            ['December', 'Tanzanite', ['#1b1650', '#4b3fd1', '#b7b0ff']],
+        ];
+        function birthdayParams(dateStr) {
+            const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr).trim());
+            if (!m) throw new Error('USE YYYY-MM-DD');
+            const y = +m[1], mo = +m[2], d = +m[3];
+            const dt = new Date(Date.UTC(y, mo - 1, d));
+            if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d || y < 1900 || y > 2100) throw new Error('NO SUCH DATE');
+            const [month, stone, colors] = BIRTHSTONES[mo - 1];
+            return { date: m[0], seed: y * 10000 + mo * 100 + d, colors: colors.slice(), stone, label: month + ' ' + d + ', ' + y };
+        }
+        let BDAY = null;
+        if (Q.get('birthday')) {
+            try {
+                const b = birthdayParams(Q.get('birthday'));
+                params = JSON.parse(JSON.stringify(defaultParams));
+                params.seed = b.seed;
+                params.colors = b.colors;
+                BDAY = Object.assign(b, { name: (Q.get('name') || '').trim().slice(0, 48) });
+                document.body.classList.add('birthday-mode');
+                syncUI();
+            } catch (err) {
+                setStatus('BIRTHDAY NOT RECOGNISED · ' + err.message);
+            }
+        } else if (/^\d{1,9}$/.test(Q.get('seed') || '')) {
+            params.seed = Math.max(1, parseInt(Q.get('seed'), 10));
+            syncUI();
+        }
+
+        // Seed editions: the first valid ETH payment on Base whose memo names a seed claims it.
+        // Set payee to the address mrio.eth resolves to (app.ens.domains) to open sales.
+        const SEAL = {
+            app: 'glitchography',
+            appLabel: 'Spacetime Glitchography',
+            payee: '0x0000000000000000000000000000000000000000',
+            payeeLabel: 'mrio.eth',
+            priceEth: '0.002',
+            chainId: 8453,
+        };
+        const SEAL_READY = !/^0x0{40}$/i.test(SEAL.payee);
+
+        function maxTexture() {
+            try {
+                const b = renderer.backend;
+                if (b && b.device && b.device.limits) return b.device.limits.maxTextureDimension2D;
+                if (b && b.gl) return b.gl.getParameter(b.gl.MAX_TEXTURE_SIZE);
+            } catch (_) { /* fall through */ }
+            return 4096;
+        }
+        async function renderAt(px) {
+            const s = SIZE(), pr = renderer.getPixelRatio();
+            renderer.setPixelRatio(1);
+            renderer.setSize(px, px, false);
+            camera.updateProjectionMatrix();
+            try {
+                if (post.renderAsync) await post.renderAsync(); else post.render();
+                const c = document.createElement('canvas');
+                c.width = c.height = px;
+                const g = c.getContext('2d');
+                g.drawImage(renderer.domElement, 0, 0);
+                // a GPU that silently gave up returns black: sample the middle before trusting it
+                const probe = g.getImageData(Math.floor(px * 0.3), Math.floor(px * 0.3), Math.floor(px * 0.4), 4).data;
+                let lit = 0;
+                for (let i = 0; i < probe.length; i += 4) lit += probe[i] + probe[i + 1] + probe[i + 2];
+                if (lit === 0) throw new Error('blank frame at ' + px + 'px');
+                return c;
+            } finally {
+                renderer.setPixelRatio(pr);
+                renderer.setSize(s, s, false);
+                camera.updateProjectionMatrix();
+            }
+        }
+        function stampCertificate(img, cert) {
+            const px = img.width, u = px / 1000, strip = Math.round(150 * u);
+            const c = document.createElement('canvas');
+            c.width = px; c.height = px + strip;
+            const g = c.getContext('2d');
+            g.drawImage(img, 0, 0);
+            g.textBaseline = 'top';
+            g.fillStyle = '#eceae5'; g.fillRect(0, px, px, strip);
+            g.fillStyle = '#b8b6af'; g.fillRect(0, px, px, Math.max(1, Math.round(u)));
+            g.fillStyle = '#23221f'; g.fillRect(0, px, 230 * u, strip);
+            g.fillStyle = '#f2f0eb'; g.font = '700 ' + 26 * u + 'px "IBM Plex Mono", monospace';
+            g.fillText(world.designation, 22 * u, px + 26 * u, 190 * u);
+            g.fillStyle = '#98958c'; g.font = '500 ' + 14 * u + 'px "IBM Plex Mono", monospace';
+            g.fillText(world.massClass + ' CLASS', 22 * u, px + 64 * u, 190 * u);
+            g.fillText('SEED ' + params.seed, 22 * u, px + 88 * u, 190 * u);
+            const x = 252 * u, w = px - 274 * u;
+            g.fillStyle = '#1f1e1c'; g.font = '900 ' + 40 * u + 'px "Archivo", sans-serif';
+            g.fillText('«' + world.name + '»', x, px + 20 * u, w);
+            const bits = [KIND_LABEL[world.kind], world.hasRings ? 'RINGED' : 'RINGLESS', world.hasAtmo ? 'ATMOSPHERE' : 'AIRLESS', RIG_LABEL[world.lightRig]];
+            if (BDAY) bits.unshift('BORN ' + BDAY.label.toUpperCase() + ' · ' + BDAY.stone.toUpperCase());
+            g.font = '600 ' + 15 * u + 'px "IBM Plex Mono", monospace';
+            g.fillText(bits.join('  ·  '), x, px + 76 * u, w);
+            const foot = cert
+                ? cert.lines.slice(1).join('  ·  ').toUpperCase()
+                : 'SPACETIME GLITCHOGRAPHY · GENERAL CATALOG · ' + new Date().toISOString().slice(0, 10);
+            g.fillStyle = '#6f6d66'; g.font = '500 ' + 12.5 * u + 'px "IBM Plex Mono", monospace';
+            g.fillText((BDAY && BDAY.name ? 'FOR ' + BDAY.name.toUpperCase() + '  ·  ' : '') + foot, x, px + 112 * u, w);
+            return c;
+        }
+        function saveCanvas(c, name) {
+            return new Promise((resolve, reject) => c.toBlob((blob) => {
+                if (!blob) return reject(new Error('image too large for this browser'));
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = name;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                resolve();
+            }, 'image/png'));
+        }
+        // Largest first. Post-processing keeps several full-size float targets, so 6144px already needs a
+        // few GB of GPU memory; a lost device cannot be recovered without a reload. Studio can force &px=8192.
+        const PRINT_SIZES = { desktop: [6144, 4096], mobile: [3072, 2048] };
+        let gpuLost = false;
+        renderer.onDeviceLost = (info) => {
+            gpuLost = true;
+            console.error('WebGPU device lost', info);
+            setStatus('GPU RESET DURING PRINT · RELOAD THE PAGE TO CONTINUE');
+        };
+        const printBtn = document.getElementById('btn-print');
+        let printing = false;
+        async function printSpecimen(cert = null) {
+            if (printing || !world) return;
+            printing = true;
+            printBtn.disabled = true;
+            setStatus('PRINTING · RENDERING AT PRINT RESOLUTION…');
+            renderer.setAnimationLoop(null);
+            try {
+                await document.fonts.ready;
+                // iOS caps a 2D canvas near 16.7M pixels, so handhelds print smaller
+                const want = parseInt(Q.get('px'), 10);
+                const ladder = STUDIO && want >= 512 ? [want] : (PERF.mobile ? PRINT_SIZES.mobile : PRINT_SIZES.desktop);
+                const sizes = ladder.filter((n) => n <= maxTexture());
+                let img = null, used = 0;
+                for (const px of sizes) {
+                    if (gpuLost) break;
+                    try { img = await renderAt(px); used = px; break; } catch (err) { console.warn('print failed at', px, err); }
+                }
+                if (!img) throw new Error(gpuLost ? 'GPU RESET · RELOAD THE PAGE' : 'THE GPU REFUSED EVERY PRINT SIZE');
+                const base = (world.designation + '-' + world.name.replace(/\s+/g, '-')).toLowerCase();
+                await saveCanvas(stampCertificate(img, cert), base + '-print-' + used + 'px.png');
+                setStatus('PRINT PULLED AT ' + used + 'px · ' + world.designation + ' «' + world.name + '»' + (cert ? ' · SEALED ' + cert.txShort : ''));
+                track('print', { seed: String(params.seed), px: String(used), sealed: cert ? 'yes' : 'no', birthday: BDAY ? 'yes' : 'no' });
+            } catch (err) {
+                setStatus('PRINT FAILED · ' + err.message);
+            } finally {
+                renderer.setAnimationLoop(tick);
+                printing = false;
+                printBtn.disabled = !STUDIO;
+            }
+        }
+        printBtn.addEventListener('click', () => printSpecimen(null));
+        if (STUDIO) {
+            printBtn.title = 'Studio print: no seal required';
+        } else if (SEAL_READY) {
+            printBtn.style.display = 'none';
+            Promise.all([import('./seedgate.js'), import('./seedgate-ui.js')]).then(([sg, ui]) => {
+                const gate = sg.createSeedGate(SEAL);
+                ui.mountSealButton({
+                    gate,
+                    getSeed: () => params.seed,
+                    container: document.getElementById('seal-slot'),
+                    label: 'SEAL & PRINT 6K · ' + gate.priceLabel,
+                    sealedLabel: 'SEALED ✓ · PRINT 6K',
+                    onUnlocked: ({ certificate }) => printSpecimen(certificate),
+                });
+            }).catch((err) => console.warn('seal unavailable', err));
+        } else {
+            printBtn.disabled = true;
+            printBtn.textContent = 'PRINT EDITIONS SOON';
+        }
+
         // ─── ignition ──────────────────────────────────────────────────────
         async function init() {
             try {
@@ -2268,6 +2477,13 @@
             }
         }
         init();
+        if (STUDIO && Q.has('autoprint')) {
+            const waitForWorld = () => {
+                if (!world) return setTimeout(waitForWorld, 300);
+                setTimeout(() => printSpecimen(null).then(() => { document.body.dataset.printed = '1'; }), 1500);
+            };
+            waitForWorld();
+        }
     </script>
 </body>
 </html>
